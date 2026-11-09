@@ -1,1 +1,1 @@
-# Algorithmie_comparative
+# bdd_relationnelle_simplifie
