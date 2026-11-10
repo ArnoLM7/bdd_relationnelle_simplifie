@@ -3,7 +3,7 @@
 ## Groupe : 
 - Adam SIDHOUM
 - Omar BENFDILA
-- Arno
+- Arno Lumiron
 
 ## Sujet du projet : 
 
