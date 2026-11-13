@@ -1,5 +1,6 @@
 #include "display.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define NUM_WIDTH 10
@@ -14,15 +15,65 @@ static int column_width(const Column *c)
     return name_len > w ? name_len : w;
 }
 
-static void print_separator(const Schema *s, FILE *out)
+static void print_separator(const Schema *s, const size_t *cols, size_t ncols, FILE *out)
 {
-    for (size_t i = 0; i < s->ncols; i++) {
+    for (size_t i = 0; i < ncols; i++) {
         fputc('+', out);
-        int w = column_width(&s->cols[i]) + 2;
+        int w = column_width(&s->cols[cols[i]]) + 2;
         for (int k = 0; k < w; k++)
             fputc('-', out);
     }
     fputs("+\n", out);
+}
+
+static void print_cell(const Table *t, const unsigned char *row, size_t col, FILE *out)
+{
+    const Column *c = &t->schema->cols[col];
+    int w = column_width(c);
+
+    switch (c->type) {
+    case COL_INT:
+        fprintf(out, "| %*d ", w, row_get_int(t, row, col));
+        break;
+    case COL_FLOAT:
+        fprintf(out, "| %*.2f ", w, row_get_float(t, row, col));
+        break;
+    case COL_TEXT:
+        fprintf(out, "| %-*.*s ", w, w, row_get_text(t, row, col));
+        break;
+    }
+}
+
+static void print_rows(const Table *t, const size_t *ids, size_t nrows,
+                       const size_t *cols, size_t ncols, FILE *out)
+{
+    const Schema *s = t->schema;
+
+    print_separator(s, cols, ncols, out);
+    for (size_t i = 0; i < ncols; i++)
+        fprintf(out, "| %-*s ", column_width(&s->cols[cols[i]]), s->cols[cols[i]].name);
+    fputs("|\n", out);
+    print_separator(s, cols, ncols, out);
+
+    for (size_t r = 0; r < nrows; r++) {
+        const unsigned char *row = get_row(t, ids ? ids[r] : r);
+        for (size_t i = 0; i < ncols; i++)
+            print_cell(t, row, cols[i], out);
+        fputs("|\n", out);
+    }
+
+    print_separator(s, cols, ncols, out);
+    fprintf(out, "%zu ligne(s)\n", nrows);
+}
+
+static size_t *all_columns(const Schema *s)
+{
+    size_t *cols = malloc(s->ncols * sizeof(size_t));
+    if (cols == NULL)
+        return NULL;
+    for (size_t i = 0; i < s->ncols; i++)
+        cols[i] = i;
+    return cols;
 }
 
 void print_schema(const Table *t, FILE *out)
@@ -43,33 +94,44 @@ void print_schema(const Table *t, FILE *out)
 
 void print_table(const Table *t, FILE *out)
 {
-    const Schema *s = t->schema;
+    size_t *cols = all_columns(t->schema);
+    if (cols == NULL)
+        return;
+    print_rows(t, NULL, table_row_count(t), cols, t->schema->ncols, out);
+    free(cols);
+}
 
-    print_separator(s, out);
-    for (size_t i = 0; i < s->ncols; i++)
-        fprintf(out, "| %-*s ", column_width(&s->cols[i]), s->cols[i].name);
-    fputs("|\n", out);
-    print_separator(s, out);
+int print_result(const Table *t, const ResultSet *rs, const char **columns, size_t ncolumns, FILE *out)
+{
+    if (t == NULL || rs == NULL)
+        return -1;
 
-    for (size_t r = 0; r < table_row_count(t); r++) {
-        const unsigned char *row = get_row(t, r);
-        for (size_t i = 0; i < s->ncols; i++) {
-            int w = column_width(&s->cols[i]);
-            switch (s->cols[i].type) {
-            case COL_INT:
-                fprintf(out, "| %*d ", w, row_get_int(t, row, i));
-                break;
-            case COL_FLOAT:
-                fprintf(out, "| %*.2f ", w, row_get_float(t, row, i));
-                break;
-            case COL_TEXT:
-                fprintf(out, "| %-*.*s ", w, w, row_get_text(t, row, i));
-                break;
+    size_t *cols;
+    size_t ncols;
+
+    if (columns == NULL || ncolumns == 0) {
+        cols = all_columns(t->schema);
+        ncols = t->schema->ncols;
+    } else {
+        cols = malloc(ncolumns * sizeof(size_t));
+        ncols = ncolumns;
+        if (cols != NULL) {
+            for (size_t i = 0; i < ncolumns; i++) {
+                int idx = schema_find_column(t->schema, columns[i]);
+                if (idx < 0) {
+                    fprintf(out, "colonne inconnue : %s\n", columns[i]);
+                    free(cols);
+                    return -1;
+                }
+                cols[i] = (size_t)idx;
             }
         }
-        fputs("|\n", out);
     }
 
-    print_separator(s, out);
-    fprintf(out, "%zu ligne(s)\n", table_row_count(t));
+    if (cols == NULL)
+        return -1;
+
+    print_rows(t, rs->row_ids, rs->count, cols, ncols, out);
+    free(cols);
+    return 0;
 }
