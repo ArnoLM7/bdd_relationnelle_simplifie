@@ -3,29 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-Value val_int(int32_t x)
-{
-    Value v;
-    v.type = COL_INT;
-    v.as.i = x;
-    return v;
-}
-
-Value val_float(double x)
-{
-    Value v;
-    v.type = COL_FLOAT;
-    v.as.f = x;
-    return v;
-}
-
-Value val_text(const char *s)
-{
-    Value v;
-    v.type = COL_TEXT;
-    v.as.s = s;
-    return v;
-}
+#include "index.h"
 
 Table *create_table_struct(const char *name, const ColumnDef *cols, size_t ncols)
 {
@@ -44,6 +22,8 @@ Table *create_table_struct(const char *name, const ColumnDef *cols, size_t ncols
 
     strcpy(t->name, name);
     rowstore_init(&t->rows, t->schema->row_size);
+    t->indexes = NULL;
+    t->nindexes = 0;
     return t;
 }
 
@@ -51,6 +31,9 @@ void free_table(Table *t)
 {
     if (t == NULL)
         return;
+    for (size_t i = 0; i < t->nindexes; i++)
+        index_free(t->indexes[i]);
+    free(t->indexes);
     rowstore_free(&t->rows);
     schema_free(t->schema);
     free(t);
@@ -101,7 +84,14 @@ long insert_row(Table *t, const Value *values)
         }
     }
 
-    return (long)(t->rows.count - 1);
+    size_t id = t->rows.count - 1;
+    for (size_t i = 0; i < t->nindexes; i++) {
+        Index *idx = t->indexes[i];
+        if (index_insert(idx, &values[idx->col], id) != 0)
+            return -1;
+    }
+
+    return (long)id;
 }
 
 const unsigned char *get_row(const Table *t, size_t row_id)
@@ -133,4 +123,17 @@ double row_get_float(const Table *t, const unsigned char *row, size_t col)
 const char *row_get_text(const Table *t, const unsigned char *row, size_t col)
 {
     return (const char *)(row + t->schema->cols[col].offset);
+}
+
+Value row_get_value(const Table *t, const unsigned char *row, size_t col)
+{
+    switch (t->schema->cols[col].type) {
+    case COL_INT:
+        return val_int(row_get_int(t, row, col));
+    case COL_FLOAT:
+        return val_float(row_get_float(t, row, col));
+    case COL_TEXT:
+        break;
+    }
+    return val_text(row_get_text(t, row, col));
 }

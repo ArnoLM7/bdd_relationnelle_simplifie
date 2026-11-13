@@ -6,25 +6,17 @@
 
 #include "schema.h"
 #include "storage.h"
+#include "value.h"
 
-typedef struct {
-    ColType type;
-    union {
-        int32_t i;
-        double f;
-        const char *s;
-    } as;
-} Value;
+struct Index;
 
 typedef struct {
     char name[MAX_NAME_LEN];
     Schema *schema;
     RowStore rows;
+    struct Index **indexes;
+    size_t nindexes;
 } Table;
-
-Value val_int(int32_t x);
-Value val_float(double x);
-Value val_text(const char *s);
 
 Table *create_table_struct(const char *name, const ColumnDef *cols, size_t ncols);
 void free_table(Table *t);
@@ -36,5 +28,6 @@ size_t table_row_count(const Table *t);
 int32_t row_get_int(const Table *t, const unsigned char *row, size_t col);
 double row_get_float(const Table *t, const unsigned char *row, size_t col);
 const char *row_get_text(const Table *t, const unsigned char *row, size_t col);
+Value row_get_value(const Table *t, const unsigned char *row, size_t col);
 
 #endif
